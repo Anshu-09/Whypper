@@ -1,50 +1,83 @@
-// Load environment variables using the ES Module-friendly import
-import 'dotenv/config';
-
-// Import required modules
+// =================================================================
+// 1. IMPORTS & INITIAL SETUP
+// =================================================================
+import 'dotenv/config'; // Loads environment variables from .env file
 import express from 'express';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { v4 as uuidv4 } from 'uuid'; // For creating unique job IDs
 
-// Recreate __dirname and __filename for ES Modules
+// Recreate __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware to parse JSON bodies from incoming requests
-app.use(express.json());
 
-// Serve the static files from the React build folder
-// IMPORTANT: The 'frontend/dist' folder will be created after you build the React app.
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
+// =================================================================
+// 2. MIDDLEWARE
+// =================================================================
+app.use(express.json()); // To parse JSON bodies from incoming requests
+app.use(express.static(path.join(__dirname, '../frontend/dist'))); // Serve static files from the React build
 
-// API endpoint for generating content with the Gemini API
-app.post('/api/generate', async (req, res) => {
-    const userTopics = req.body.prompt;
+
+// =================================================================
+// 3. APPLICATION LOGIC (BACKGROUND JOBS)
+// =================================================================
+
+// In-memory "database" to store job statuses.
+// In a real production app, you would use a proper database like Redis or PostgreSQL.
+const jobs = {};
+
+/**
+ * A helper function to safely parse JSON from the model's response.
+ * This function looks for the first '{' and the last '}' to extract the JSON object,
+ * which helps clean up extra text like "Here is your JSON:" or markdown code blocks.
+ * @param {string} text - The raw text response from the LLM.
+ * @returns {object} The parsed JSON object.
+ */
+function parseJsonFromModelResponse(text) {
+    const startIndex = text.indexOf('{');
+    const endIndex = text.lastIndexOf('}');
     
-    // Check for a valid prompt and API key
-    if (!userTopics || !process.env.GEMINI_API_KEY) {
-        return res.status(400).json({ error: 'Prompt and API key are required.' });
+    if (startIndex === -1 || endIndex === -1) {
+        throw new Error("Could not find a JSON object in the model's response.");
     }
-    
-    // NOTE: The model name in the URL might need updates based on the latest Gemini models.
-    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-    
+
+    const jsonString = text.substring(startIndex, endIndex + 1);
+    return JSON.parse(jsonString);
+}
+
+
+/**
+ * The main worker function that calls the Gemini API in the background.
+ * @param {string} jobId - The unique ID for the job.
+ * @param {string} userTopics - The topics provided by the user.
+ */
+const runGeneration = async (jobId, userTopics) => {
     try {
+        console.log(`[Job ${jobId}] Starting Gemini API call for topics: "${userTopics}"`);
+        
+        // ==============================================================================
+        // !!! IMPORTANT !!!
+        // Replace 'gemini-1.5-pro-latest' with the model name that your `checkModels.js`
+        // script showed was available for your API key.
+        // ==============================================================================
+        const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+        
         const payload = {
-            contents: [{ 
-                parts: [{ 
+            contents: [{
+                parts: [{
                     text: `Act as an expert technical interviewer. Based on the following topics: ${userTopics}, generate a structured JSON response.
-                    
+
 The response must contain three sections: "Medium", "Hard", and "Ultra Hard". Each section must be an array of objects. Each object should represent a question and have "type" and "text" properties. The types must be "MCQ", "Code Snippet", or "DSA".
-                    
+
 Ensure there are 2 questions of each type for each difficulty level. The "Hard" DSA questions must combine at least two topics, and the "Ultra Hard" DSA questions must combine all topics.
-                    
+
 Return only the JSON object, no other text.`
                 }]
-            }],
+            }]
         };
 
         const response = await fetch(apiUrl, {
@@ -53,39 +86,82 @@ Return only the JSON object, no other text.`
             body: JSON.stringify(payload),
         });
 
+        // Correctly handle the response body to avoid the "body already read" error
         if (!response.ok) {
-            const errorData = await response.json();
-            console.error('API Error:', errorData);
-            return res.status(response.status).json({ error: 'Failed to get a response from the Gemini API.' });
+            const errorData = await response.json(); // Read the body ONCE for the error
+            console.error(`[Job ${jobId}] API Error received:`, errorData);
+            jobs[jobId].status = 'failed';
+            return; // Stop the function here
         }
 
-        const result = await response.json();
-        
-        if (result.candidates && result.candidates[0].content) {
-            // The JSON response from the model is a string in the 'text' field
-            const generatedText = result.candidates[0].content.parts[0].text;
-            try {
-                // We need to parse this string into a JSON object
-                const jsonResponse = JSON.parse(generatedText);
-                res.json(jsonResponse);
-            } catch (parseError) {
-                console.error('JSON Parsing Error:', parseError);
-                res.status(500).json({ error: 'Failed to parse the JSON response from the model.' });
-            }
-        } else {
-            // If the model did not generate content (e.g., due to safety filters), return an error.
-            console.error('No content generated by the model. Full API response:', result);
-            res.status(500).json({ error: 'No content was generated by the model. Please try again.' });
-        }
+        const result = await response.json(); // Read the body ONCE for the success case
+
+        // ==============================================================================
+        // THIS IS THE CRITICAL DEBUGGING STEP: Log the raw text from the model
+        // ==============================================================================
+        const generatedText = result.candidates[0].content.parts[0].text;
+        console.log("\n--- RAW RESPONSE FROM GEMINI ---");
+        console.log(generatedText);
+        console.log("---------------------------------\n");
+
+        // Use the robust parsing function to handle potential extra text from the model
+        const parsedResult = parseJsonFromModelResponse(generatedText);
+
+        jobs[jobId].status = 'completed';
+        jobs[jobId].result = parsedResult;
+        console.log(`[Job ${jobId}] Completed and parsed successfully.`);
 
     } catch (error) {
-        console.error('Server error:', error);
-        res.status(500).json({ error: 'An unexpected server error occurred.' });
+        // This will catch errors from the fetch call itself or from the JSON.parse step
+        console.error(`[Job ${jobId}] Failed during generation or parsing:`, error);
+        jobs[jobId].status = 'failed';
     }
+};
+
+
+// =================================================================
+// 4. API ENDPOINTS
+// =================================================================
+
+// Endpoint to START a generation job
+app.post('/api/generate', (req, res) => {
+    const userTopics = req.body.prompt;
+    if (!userTopics) {
+        return res.status(400).json({ error: 'Prompt is required.' });
+    }
+
+    const jobId = uuidv4();
+    jobs[jobId] = { status: 'pending', topics: userTopics, result: null };
+
+    // Immediately respond to the user with the job ID
+    res.status(202).json({ jobId: jobId });
+
+    // Start the long-running task in the background
+    runGeneration(jobId, userTopics); 
 });
 
+// Endpoint to CHECK the status of a job
+app.get('/api/status/:jobId', (req, res) => {
+    const jobId = req.params.jobId;
+    const job = jobs[jobId];
+
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found.' });
+    }
+
+    res.json({
+        status: job.status,
+        result: job.result
+    });
+});
+
+
+// =================================================================
+// 5. SERVE FRONTEND & START SERVER
+// =================================================================
+
 // For any other requests, serve the main index.html file to handle client-side routing
-app.get(/.* /, (req, res) => {
+app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
