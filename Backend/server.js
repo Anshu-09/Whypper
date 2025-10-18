@@ -19,7 +19,7 @@ const port = process.env.PORT || 3000;
 // 2. MIDDLEWARE
 // =================================================================
 app.use(express.json()); // To parse JSON bodies from incoming requests
-app.use(express.static(path.join(__dirname, '../frontend/dist'))); // Serve static files from the React build
+app.use(express.static(path.join(__dirname, '../frontend'))); // Serve static files from the React build
 
 
 // =================================================================
@@ -55,7 +55,7 @@ function parseJsonFromModelResponse(text) {
  * @param {string} jobId - The unique ID for the job.
  * @param {string} userTopics - The topics provided by the user.
  */
-const runGeneration = async (jobId, userTopics) => {
+const runGeneration = async (jobId, userTopics, language) => {
     try {
         console.log(`[Job ${jobId}] Starting Gemini API call for topics: "${userTopics}"`);
         
@@ -69,11 +69,17 @@ const runGeneration = async (jobId, userTopics) => {
         const payload = {
             contents: [{
                 parts: [{
-                    text: `Act as an expert technical interviewer. Based on the following topics: ${userTopics}, generate a structured JSON response.
+                    text: `Act as an expert technical interviewer. Based on the following topics: ${userTopics} and programming language: ${language}, generate a structured JSON response.
 
-The response must contain three sections: "Medium", "Hard", and "Ultra Hard". Each section must be an array of objects. Each object should represent a question and have "type" and "text" properties. The types must be "MCQ", "Code Snippet", or "DSA".
+The response must contain three sections: "Medium", "Hard", and "Ultra Hard". Each section must be an array of objects with these properties:
+- "type": "MCQ", "Code Snippet", or "DSA"
+- "text": the question text
+- "options": array of 4 options (only for MCQ type)
+- "answer": correct answer (option letter A/B/C/D for MCQ, or text answer for others)
 
-Ensure there are 2 questions of each type for each difficulty level. The "Hard" DSA questions must combine at least two topics, and the "Ultra Hard" DSA questions must combine all topics.
+For MCQ: provide 4 options labeled A, B, C, D. For Code Snippet/DSA: provide the expected answer or solution approach.
+
+Ensure there are 2 questions of each type for each difficulty level. Use ${language} syntax for code questions.
 
 Return only the JSON object, no other text.`
                 }]
@@ -126,18 +132,19 @@ Return only the JSON object, no other text.`
 // Endpoint to START a generation job
 app.post('/api/generate', (req, res) => {
     const userTopics = req.body.prompt;
+    const language = req.body.language || 'JavaScript';
     if (!userTopics) {
         return res.status(400).json({ error: 'Prompt is required.' });
     }
 
     const jobId = uuidv4();
-    jobs[jobId] = { status: 'pending', topics: userTopics, result: null };
+    jobs[jobId] = { status: 'pending', topics: userTopics, language: language, result: null };
 
     // Immediately respond to the user with the job ID
     res.status(202).json({ jobId: jobId });
 
     // Start the long-running task in the background
-    runGeneration(jobId, userTopics); 
+    runGeneration(jobId, userTopics, language); 
 });
 
 // Endpoint to CHECK the status of a job

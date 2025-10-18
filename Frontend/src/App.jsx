@@ -37,34 +37,20 @@ const QuestionTypeIcon = ({ type }) => {
     }
 };
 
-
-// ==============================================================================
-// Main Application Component
-// ==============================================================================
 function App() {
   const [topics, setTopics] = useState('');
+  const [language, setLanguage] = useState('JavaScript');
   const [questions, setQuestions] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // State for progression
+  // Quiz state
   const [unlockedDifficulties, setUnlockedDifficulties] = useState(['Medium']);
   const [activeTab, setActiveTab] = useState('Medium');
-  const [unlockedQuestionIndex, setUnlockedQuestionIndex] = useState({ 'Medium': 0, 'Hard': 0, 'Ultra Hard': 0 });
-
-  // State to manage smooth appearance of questions
-  const [visibleQuestions, setVisibleQuestions] = useState({ 'Medium': [], 'Hard': [], 'Ultra Hard': [] });
-
-  useEffect(() => {
-    if (questions) {
-      const newVisible = { ...visibleQuestions };
-      const currentUnlocked = unlockedQuestionIndex[activeTab];
-      
-      // Filter questions that should be visible
-      newVisible[activeTab] = questions[activeTab].filter((_, qIndex) => qIndex <= currentUnlocked);
-      setVisibleQuestions(newVisible);
-    }
-  }, [unlockedQuestionIndex, activeTab, questions]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState({ 'Medium': 0, 'Hard': 0, 'Ultra Hard': 0 });
+  const [userAnswers, setUserAnswers] = useState({});
+  const [showAnswer, setShowAnswer] = useState({});
+  const [gameOver, setGameOver] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -73,15 +59,17 @@ function App() {
     setQuestions(null);
     setUnlockedDifficulties(['Medium']);
     setActiveTab('Medium');
-    setUnlockedQuestionIndex({ 'Medium': 0, 'Hard': 0, 'Ultra Hard': 0 });
-    setVisibleQuestions({ 'Medium': [], 'Hard': [], 'Ultra Hard': [] });
+    setCurrentQuestionIndex({ 'Medium': 0, 'Hard': 0, 'Ultra Hard': 0 });
+    setUserAnswers({});
+    setShowAnswer({});
+    setGameOver(false);
 
     let intervalId;
     try {
       const generateResponse = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: topics }),
+        body: JSON.stringify({ prompt: topics, language: language }),
       });
 
       if (!generateResponse.ok) throw new Error((await generateResponse.json()).error || 'Failed to start job.');
@@ -116,20 +104,39 @@ function App() {
     }
   };
   
-  const handleCompleteDifficulty = (difficulty) => {
-    const nextDifficulty = { 'Medium': 'Hard', 'Hard': 'Ultra Hard' };
-    const next = nextDifficulty[difficulty];
-    if (next) {
-      setUnlockedDifficulties(prev => [...prev, next]);
-      setActiveTab(next);
+  const handleAnswer = (questionKey, answer) => {
+    setUserAnswers(prev => ({ ...prev, [questionKey]: answer }));
+    setShowAnswer(prev => ({ ...prev, [questionKey]: true }));
+    
+    const question = questions[activeTab][currentQuestionIndex[activeTab]];
+    if (answer === question.answer) {
+      setTimeout(() => {
+        if (currentQuestionIndex[activeTab] < questions[activeTab].length - 1) {
+          setCurrentQuestionIndex(prev => ({ ...prev, [activeTab]: prev[activeTab] + 1 }));
+          setShowAnswer(prev => ({ ...prev, [questionKey]: false }));
+        } else {
+          const nextDifficulty = { 'Medium': 'Hard', 'Hard': 'Ultra Hard' };
+          const next = nextDifficulty[activeTab];
+          if (next) {
+            setUnlockedDifficulties(prev => [...prev, next]);
+            setActiveTab(next);
+          }
+        }
+      }, 1500);
+    } else {
+      setGameOver(true);
+      setTimeout(() => {
+        handleSubmit({ preventDefault: () => {} });
+      }, 3000);
     }
   };
 
-  const handleUnlockNextQuestion = () => {
-    if (unlockedQuestionIndex[activeTab] < questions[activeTab].length - 1) {
-      setUnlockedQuestionIndex(prev => ({ ...prev, [activeTab]: prev[activeTab] + 1 }));
-    }
+  const getCurrentQuestion = () => {
+    if (!questions || !questions[activeTab]) return null;
+    return questions[activeTab][currentQuestionIndex[activeTab]];
   };
+
+  const getQuestionKey = () => `${activeTab}-${currentQuestionIndex[activeTab]}`;
 
   const getDifficultyColor = (difficulty, type = 'text') => {
     const colors = {
@@ -141,20 +148,34 @@ function App() {
     return (colors[difficulty] || colors['default'])[type];
   };
 
-  const allQuestionsInLevelUnlocked = questions && unlockedQuestionIndex[activeTab] === questions[activeTab].length - 1;
+  const isLastQuestion = questions && currentQuestionIndex[activeTab] === questions[activeTab].length - 1;
+  const currentQuestion = getCurrentQuestion();
+  const questionKey = getQuestionKey();
+  const hasAnswered = userAnswers[questionKey] !== undefined;
+  const isCorrect = hasAnswered && userAnswers[questionKey] === currentQuestion?.answer;
 
   return (
     <div className="min-h-screen bg-gray-900 font-sans flex items-center justify-center p-4">
       <div className="w-full max-w-4xl bg-gray-800 rounded-lg shadow-xl overflow-hidden p-6 md:p-8 space-y-8">
         <div className="text-center">
-            <h1 className="text-4xl font-bold text-white">Tech Interview Prep</h1>
-            <p className="text-gray-400 mt-2">Generate a question set and progress through the levels.</p>
+            <h1 className="text-4xl font-bold text-white">Tech Interview Quiz</h1>
+            <p className="text-gray-400 mt-2">Answer questions correctly to unlock the next ones.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input type="text" value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="Enter topics (e.g., 'JavaScript, Arrays')" className="w-full px-4 py-3 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-700 text-white placeholder-gray-400" disabled={loading} />
+          <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full px-4 py-3 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-700 text-white" disabled={loading}>
+            <option value="JavaScript">JavaScript</option>
+            <option value="Python">Python</option>
+            <option value="Java">Java</option>
+            <option value="C++">C++</option>
+            <option value="C#">C#</option>
+            <option value="Go">Go</option>
+            <option value="Rust">Rust</option>
+            <option value="TypeScript">TypeScript</option>
+          </select>
+          <input type="text" value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="Enter topics (e.g., 'Arrays, Sorting')" className="w-full px-4 py-3 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-700 text-white placeholder-gray-400" disabled={loading} />
           <button type="submit" className="w-full flex items-center justify-center px-4 py-3 text-white font-semibold bg-blue-600 rounded-lg shadow-lg hover:bg-blue-700 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed" disabled={loading}>
-            {loading ? <><svg className="animate-spin h-5 w-5 mr-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Generating...</span></> : 'Generate Questions'}
+            {loading ? <><svg className="animate-spin h-5 w-5 mr-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Generating...</span></> : 'Generate Quiz'}
           </button>
         </form>
 
@@ -162,48 +183,75 @@ function App() {
         {error && <div className="bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg text-center"><strong>Error:</strong> {error}</div>}
 
         {questions && (
-          <div className="mt-8 space-y-4 animate-fade-in">
+          <div className="mt-8 space-y-4">
             <div className="flex border-b border-gray-700">
               {Object.keys(questions).map((difficulty) => (
-                <button key={difficulty} disabled={!unlockedDifficulties.includes(difficulty)} onClick={() => setActiveTab(difficulty)} className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium text-center transition-colors duration-200 focus:outline-none ${activeTab === difficulty ? `${getDifficultyColor(difficulty, 'bg')} text-white` : unlockedDifficulties.includes(difficulty) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 cursor-not-allowed'}`}>
+                <button key={difficulty} disabled={!unlockedDifficulties.includes(difficulty)} onClick={() => setActiveTab(difficulty)} className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium transition-colors duration-200 ${activeTab === difficulty ? `${getDifficultyColor(difficulty, 'bg')} text-white` : unlockedDifficulties.includes(difficulty) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 cursor-not-allowed'}`}>
                   {!unlockedDifficulties.includes(difficulty) && <LockIcon />} {difficulty}
                 </button>
               ))}
             </div>
 
-            <div className="space-y-4 p-4">
-              {visibleQuestions[activeTab]?.map((q, qIndex) => (
-                <div key={qIndex} className="p-4 bg-gray-700 rounded-md animate-fade-in-up">
-                  <p className="font-medium text-gray-200 flex items-center gap-3">
-                    <span className={`flex-shrink-0 p-2 rounded-full bg-gray-800 ${getDifficultyColor(activeTab, 'text')}`}><QuestionTypeIcon type={q.type} /></span> 
-                    <span>{q.text}</span>
-                  </p>
+            {currentQuestion && (
+              <div className="p-6 bg-gray-700 rounded-lg space-y-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className={`p-2 rounded-full bg-gray-800 ${getDifficultyColor(activeTab, 'text')}`}>
+                    <QuestionTypeIcon type={currentQuestion.type} />
+                  </span>
+                  <span className="text-sm text-gray-400">{currentQuestion.type} - Question {currentQuestionIndex[activeTab] + 1}/{questions[activeTab].length}</span>
                 </div>
-              ))}
-
-              {questions[activeTab].map((q, qIndex) => (
-                <div key={qIndex}>
-                    {qIndex > unlockedQuestionIndex[activeTab] && (
-                        <div className="p-4 bg-gray-700/50 border-2 border-dashed border-gray-600 rounded-md text-center text-gray-500 flex items-center justify-center">
-                            <LockIcon /> Question Locked
-                        </div>
+                
+                <h3 className="text-lg font-medium text-white mb-4">{currentQuestion.text}</h3>
+                
+                {currentQuestion.type === 'MCQ' ? (
+                  <div className="space-y-2">
+                    {currentQuestion.options?.map((option, idx) => {
+                      const optionLetter = String.fromCharCode(65 + idx);
+                      const isSelected = userAnswers[questionKey] === optionLetter;
+                      const isCorrectOption = optionLetter === currentQuestion.answer;
+                      return (
+                        <button key={idx} disabled={hasAnswered} onClick={() => handleAnswer(questionKey, optionLetter)} className={`w-full text-left p-3 rounded border transition-colors ${
+                          hasAnswered ? (
+                            isCorrectOption ? 'bg-green-500/20 border-green-500 text-green-300' :
+                            isSelected ? 'bg-red-500/20 border-red-500 text-red-300' :
+                            'bg-gray-600 border-gray-600 text-gray-400'
+                          ) : 'bg-gray-600 border-gray-600 text-white hover:bg-gray-500'
+                        }`}>
+                          <span className="font-medium">{optionLetter}.</span> {option}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <textarea placeholder="Enter your answer..." disabled={hasAnswered} onChange={(e) => setUserAnswers(prev => ({ ...prev, [questionKey]: e.target.value }))} className="w-full p-3 bg-gray-600 border border-gray-500 rounded text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none" rows="4" />
+                    {!hasAnswered && (
+                      <button onClick={() => handleAnswer(questionKey, userAnswers[questionKey] || '')} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+                        Submit Answer
+                      </button>
                     )}
-                </div>
-              ))}
-              
-              {!allQuestionsInLevelUnlocked && (
-                <button onClick={handleUnlockNextQuestion} className="w-full mt-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg shadow-lg hover:bg-blue-700 transition-all duration-300">Reveal Next Question</button>
-              )}
-              
-              {activeTab !== 'Ultra Hard' && allQuestionsInLevelUnlocked && (
-                 <button onClick={() => handleCompleteDifficulty(activeTab)} className={`w-full mt-4 px-4 py-3 font-semibold text-white ${getDifficultyColor(activeTab, 'bg')} ${getDifficultyColor(activeTab, 'bg_hover')} rounded-lg shadow-lg transition-all duration-300`}>Complete {activeTab} & Proceed to Next Level</button>
-              )}
-              {activeTab === 'Ultra Hard' && allQuestionsInLevelUnlocked && (
-                <div className="text-center p-4 mt-4 bg-green-500/20 border border-green-500 rounded-lg text-green-300 font-semibold">
-                  🎉 Congratulations! You have completed all levels!
-                </div>
-              )}
-            </div>
+                  </div>
+                )}
+                
+                {showAnswer[questionKey] && (
+                  <div className={`mt-4 p-4 rounded-lg ${isCorrect ? 'bg-green-500/20 border border-green-500' : 'bg-red-500/20 border border-red-500'}`}>
+                    <p className={`font-medium ${isCorrect ? 'text-green-300' : 'text-red-300'}`}>
+                      {isCorrect ? '✓ Correct!' : gameOver ? '💀 Uh-Oh, you lost the game!' : '✗ Incorrect'}
+                    </p>
+                    <p className="text-gray-300 mt-2">Answer: {currentQuestion.answer}</p>
+                    {isCorrect && !isLastQuestion && <p className="text-sm text-gray-400 mt-2">Next question loading...</p>}
+                    {isCorrect && isLastQuestion && activeTab !== 'Ultra Hard' && <p className="text-sm text-gray-400 mt-2">Level completed! Moving to next difficulty...</p>}
+                    {gameOver && <p className="text-sm text-gray-400 mt-2">Generating fresh questions...</p>}
+                  </div>
+                )}
+                
+                {activeTab === 'Ultra Hard' && isLastQuestion && isCorrect && (
+                  <div className="text-center p-4 mt-4 bg-green-500/20 border border-green-500 rounded-lg text-green-300 font-semibold">
+                    🎉 Congratulations! You completed all questions!
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -212,4 +260,3 @@ function App() {
 }
 
 export default App;
-
