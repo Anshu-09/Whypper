@@ -69,7 +69,7 @@ const runGeneration = async (jobId, userTopics, language) => {
         const payload = {
             contents: [{
                 parts: [{
-                    text: `Act as an expert technical interviewer. Based on the following topics: ${userTopics} and programming language: ${language}, generate a structured JSON response.
+                    text: `Act as an expert technical interviewer. Based on the following topics: ${userTopics} and programming language: ${language} selected by the user is the programming syntax he/she prefers to solve the questions on, generate a structured JSON response.
 
 The response must contain three sections: "Medium", "Hard", and "Ultra Hard". Each section must be an array of objects with these properties:
 - "type": "MCQ", "Code Snippet", or "DSA"
