@@ -1,4 +1,3 @@
-// =================================================================
 // 1. IMPORTS & INITIAL SETUP
 // =================================================================
 import 'dotenv/config'; // Loads environment variables from .env file
