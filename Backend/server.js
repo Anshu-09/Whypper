@@ -44,24 +44,27 @@ function parseJsonFromModelResponse(text) {
         throw new Error("Could not find a JSON object in the model's response.");
     }
 
-    const jsonString = text.substring(startIndex, endIndex + 1);
-    // return JSON.parse(jsonString);
-
-    const cleanedString = jsonString
-                            .replace(/\n/g, "\\n")
-                            .replace(/\r/g, "\\r");
+    let jsonString = text.substring(startIndex, endIndex + 1);
     
-    // We add a new try...catch here for better debugging,
-    // in case this fix still isn't enough.
+    // Decode HTML entities and clean the string
+    const cleanedString = jsonString
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+    
     try {
         return JSON.parse(cleanedString);
     } catch (e) {
-        console.error("Failed to parse the *cleaned* JSON:", e);
-        console.log("--- Cleaned JSON String That Failed ---");
-        // Log the string that failed to help debug further
-        console.log(cleanedString); 
-        console.log("---------------------------------------");
-        throw new Error("JSON parsing failed even after cleaning. Check server logs for the 'cleanedString'.");
+        console.error("Failed to parse JSON:", e.message);
+        console.log("--- Failed JSON String ---");
+        console.log(cleanedString.substring(0, 500) + '...');
+        console.log("-------------------------");
+        throw new Error("JSON parsing failed. Check server logs.");
     }
 }
 

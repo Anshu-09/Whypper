@@ -49,18 +49,6 @@ function PracticeDashboard() {
             </button>
           </Link>
 
-          {/* Button 3: Back to Home (Subtle) */}
-          <Link to="/" className="pt-4">
-            <button className="
-              w-full py-2 px-6 text-gray-400 font-medium
-              bg-gray-800/30 rounded-lg
-              transition-all duration-300
-              hover:bg-gray-700/50 hover:text-gray-200
-            ">
-              Back to Home
-            </button>
-          </Link>
-
         </div>
       </div>
     </div>
