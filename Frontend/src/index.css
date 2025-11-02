@@ -1,3 +1,38 @@
+/* Make sure these are at the top */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Add these new classes */
+
+/* This creates the dark, "glowing from the middle" background */
+.hero-background {
+  background-color: #030712; /* A very dark blue/black */
+  
+  /* This creates a soft, radial glow in the center */
+  background-image: radial-gradient(
+    ellipse at center,
+    rgba(68, 47, 137, 0.25) 0%, /* A faint purple glow */
+    transparent 70%
+  );
+  overflow: hidden; /* Ensures no weird scrollbars */
+}
+
+/* This is the class for your gradient title */
+.gradient-text {
+  /* Create the gradient */
+  background: linear-gradient(
+    90deg,
+    #00F0FF, /* Cyan */
+    #8F00FF, /* Purple */
+    #FF00B7  /* Pink */
+  );
+  
+  /* Clip the background to the text */
+  -webkit-background-clip: text;
+  background-clip: text;
+  
+  /* Make the text color transparent so the background shows through */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
